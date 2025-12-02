@@ -110,28 +110,34 @@ export default function Home() {
   
 
 // 获取新闻 (中文版 + 智能筛选)
+// 修复版：带错误检查和自动回退的新闻获取
   const fetchNews = async () => {
     try {
-      // 1. 从配置里提取所有代币符号 (例如: ONDO,MKR,CFG...)
       const symbols = ASSET_CONFIG.map(a => a.symbol).join(',');
-      
-      // 2. 构造分类参数：包含我们的代币，再加上 'DeFi' 和 'RWA' 防止没新闻
-      // 注意：API 对大小写不敏感，但最好用英文符号
-      const categories = `${symbols},DeFi,RWA,Ethereum`;
-
-      console.log("Fetching news for:", categories); // 方便调试
-
-      // 3. 发送请求
-      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=ZH&categories=${categories}`);
+      // 尝试获取筛选后的新闻
+      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=ZH&categories=${symbols},DeFi,Ethereum`);
       const data = await res.json();
       
-      if (data.Data) {
+      // 关键修复：先检查 data.Data 到底是不是一个数组
+      if (data.Data && Array.isArray(data.Data)) {
         setNews(data.Data.slice(0, 6));
+      } else {
+        console.warn("按币种筛选新闻失败，正在切换回通用新闻...");
+        // 如果筛选失败（API返回了非数组数据），自动回退到获取通用新闻
+        const fallbackRes = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=ZH');
+        const fallbackData = await fallbackRes.json();
+        
+        if (fallbackData.Data && Array.isArray(fallbackData.Data)) {
+          setNews(fallbackData.Data.slice(0, 6));
+        }
       }
     } catch (e) { 
       console.error("News fetch error", e); 
+      // 出错时保持空数组，防止页面崩溃
+      setNews([]);
     }
   };
+
 
   useEffect(() => {
     // 1. 页面加载瞬间：先尝试从 localStorage 读取缓存
