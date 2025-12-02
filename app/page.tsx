@@ -2,89 +2,153 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { 
-  Globe, Activity, Shield, TrendingUp, 
-  Clock, Newspaper, RefreshCw 
-} from 'lucide-react';
+import { Globe, Activity, Shield, TrendingUp, Clock, Newspaper, RefreshCw } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { ASSET_CONFIG } from './config'; // 导入配置文件
 
-// 1. 增加 defillamaId 字段，用于获取真实 TVL
-const INITIAL_ASSETS = [
-  { id: 'ondo-finance', defillamaId: 'ondo-finance', symbol: 'ONDO', name: 'Ondo Finance', price: 0, change: 0, tvl: '-', history: [0,0,0,0,0] },
-  { id: 'maker', defillamaId: 'makerdao', symbol: 'MKR', name: 'MakerDAO', price: 0, change: 0, tvl: '-', history: [0,0,0,0,0] },
-  { id: 'centrifuge', defillamaId: 'centrifuge', symbol: 'CFG', name: 'Centrifuge', price: 0, change: 0, tvl: '-', history: [0,0,0,0,0] },
-  { id: 'maple', defillamaId: 'maple', symbol: 'MPL', name: 'Maple Finance', price: 0, change: 0, tvl: '-', history: [0,0,0,0,0] },
-  { id: 'goldfinch', defillamaId: 'goldfinch', symbol: 'GFI', name: 'Goldfinch', price: 0, change: 0, tvl: '-', history: [0,0,0,0,0] },
-];
-
-// 辅助函数：把数字变成 B (Billion) 或 M (Million)
-const formatTVL = (num: number) => {
-  if (!num) return '-';
-  if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
-  if (num >= 1e6) return `$${(num / 1e6).toFixed(1)}M`;
-  return `$${num.toLocaleString()}`;
-};
+// 定义数据结构
+interface AssetData {
+  id: string;
+  defillamaId: string;
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  tvl: string;
+  history: number[];
+}
 
 export default function Home() {
-  const [assets, setAssets] = useState(INITIAL_ASSETS);
+  // 1. 初始化状态：先用配置生成空数据
+  const [assets, setAssets] = useState<AssetData[]>(() => {
+    return ASSET_CONFIG.map(item => ({
+      ...item,
+      price: 0,
+      change: 0,
+      tvl: '-',
+      history: [0, 0, 0, 0, 0]
+    }));
+  });
+  
   const [news, setNews] = useState<any[]>([]);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false); // 专门控制转圈圈的状态
 
-  // --- 获取价格 (CoinGecko) ---
-  const fetchPrices = async () => {
-    try {
-      const ids = assets.map(a => a.id).join(',');
-      const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
-      if (!res.ok) throw new Error('Price API Error');
-      const data = await res.json();
-
-      setAssets(prev => prev.map(asset => {
-        const newPrice = data[asset.id]?.usd || asset.price;
-        const newChange = data[asset.id]?.usd_24h_change || 0;
-        // 如果价格是0，先填满历史，否则追加
-        const currentHistory = asset.history[0] === 0 ? Array(5).fill(newPrice) : asset.history;
-        const newHistory = [...currentHistory.slice(1), newPrice]; 
-        return { ...asset, price: newPrice, change: newChange, history: newHistory };
-      }));
-      setLastUpdate(new Date());
-    } catch (e) { console.warn("Price fetch failed, using old data"); }
+  // 辅助函数：格式化 TVL
+  const formatTVL = (num: number) => {
+    if (!num) return '-';
+    if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
+    if (num >= 1e6) return `$${(num / 1e6).toFixed(1)}M`;
+    return `$${num.toLocaleString()}`;
   };
 
-  // --- 获取 TVL (DefiLlama) ---
-  const fetchTVL = async () => {
+  // 核心：获取数据并处理缓存
+  const fetchAllData = async () => {
+    setIsUpdating(true);
     try {
-      // 并行获取所有协议的 TVL
-      const promises = assets.map(async (asset) => {
-        if (!asset.defillamaId) return { id: asset.id, tvl: 0 };
-        const res = await fetch(`https://api.llama.fi/tvl/${asset.defillamaId}`);
-        const tvlNum = await res.json();
-        return { id: asset.id, tvl: tvlNum };
+      // --- A. 获取价格 ---
+      const ids = ASSET_CONFIG.map(a => a.id).join(',');
+      const priceRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
+      
+      // 如果 API 限制，抛出错误，直接跳到 catch，保留旧数据
+      if (!priceRes.ok) throw new Error('Rate Limit'); 
+      
+      const priceData = await priceRes.json();
+
+      // --- B. 获取 TVL (并行) ---
+      const tvlPromises = ASSET_CONFIG.map(async (asset) => {
+        try {
+          const res = await fetch(`https://api.llama.fi/tvl/${asset.defillamaId}`);
+          return { id: asset.id, val: await res.json() };
+        } catch {
+          return { id: asset.id, val: null };
+        }
+      });
+      const tvlResults = await Promise.all(tvlPromises);
+
+      // --- C. 合并数据 ---
+      setAssets(prevAssets => {
+        const newAssets = prevAssets.map(asset => {
+          const newPrice = priceData[asset.id]?.usd || asset.price;
+          const newChange = priceData[asset.id]?.usd_24h_change || asset.change;
+          
+          // 只有当价格有效时才更新历史
+          let newHistory = asset.history;
+          if (newPrice > 0) {
+             // 简单的平滑处理：如果历史全是0，就填满当前价格，否则追加
+             const validHistory = asset.history[0] === 0 ? Array(5).fill(newPrice) : asset.history;
+             newHistory = [...validHistory.slice(1), newPrice];
+          }
+
+          const tvlItem = tvlResults.find(t => t.id === asset.id);
+          const newTvl = tvlItem && tvlItem.val ? formatTVL(tvlItem.val) : asset.tvl;
+
+          return {
+            ...asset,
+            price: newPrice,
+            change: newChange,
+            tvl: newTvl,
+            history: newHistory
+          };
+        });
+
+        // *** 关键：保存到本地缓存 ***
+        localStorage.setItem('cachedAssets', JSON.stringify(newAssets));
+        localStorage.setItem('lastUpdate', new Date().toISOString());
+        
+        return newAssets;
       });
 
-      const results = await Promise.all(promises);
-      
-      // 更新 State
-      setAssets(prev => prev.map(asset => {
-        const found = results.find(r => r.id === asset.id);
-        return found ? { ...asset, tvl: formatTVL(found.tvl) } : asset;
-      }));
-    } catch (e) { console.error("TVL fetch failed", e); }
-  };
+      setLastUpdate(new Date());
 
-  // --- 获取新闻 ---
+    } catch (error) {
+      console.warn("API 繁忙，使用缓存数据");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+  
+
+// 获取新闻 (中文版 + 智能筛选)
   const fetchNews = async () => {
     try {
-      const res = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN');
+      // 1. 从配置里提取所有代币符号 (例如: ONDO,MKR,CFG...)
+      const symbols = ASSET_CONFIG.map(a => a.symbol).join(',');
+      
+      // 2. 构造分类参数：包含我们的代币，再加上 'DeFi' 和 'RWA' 防止没新闻
+      // 注意：API 对大小写不敏感，但最好用英文符号
+      const categories = `${symbols},DeFi,RWA,Ethereum`;
+
+      console.log("Fetching news for:", categories); // 方便调试
+
+      // 3. 发送请求
+      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=ZH&categories=${categories}`);
       const data = await res.json();
-      if (data.Data) setNews(data.Data.slice(0, 6));
-    } catch (e) { console.error("News fetch error"); }
+      
+      if (data.Data) {
+        setNews(data.Data.slice(0, 6));
+      }
+    } catch (e) { 
+      console.error("News fetch error", e); 
+    }
   };
 
   useEffect(() => {
-    fetchPrices();
-    fetchTVL(); // 新增：加载 TVL
+    // 1. 页面加载瞬间：先尝试从 localStorage 读取缓存
+    const cached = localStorage.getItem('cachedAssets');
+    const cachedTime = localStorage.getItem('lastUpdate');
+    
+    if (cached) {
+      setAssets(JSON.parse(cached));
+      if (cachedTime) setLastUpdate(new Date(cachedTime));
+    }
+
+    // 2. 然后发起网络请求去更新 (用户已经看到缓存数据了，不会觉得卡)
+    fetchAllData();
     fetchNews();
-    const timer = setInterval(fetchPrices, 10000);
+
+    // 3. 定时器
+    const timer = setInterval(fetchAllData, 15000); // 改为 15秒，避免太频繁被封
     return () => clearInterval(timer);
   }, []);
 
@@ -100,15 +164,15 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-4 text-sm">
             <div className="flex items-center gap-2 text-xs text-gray-500 bg-white/5 px-3 py-1 rounded-full">
-               {lastUpdate ? <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div> : <RefreshCw className="w-3 h-3 animate-spin" />}
-               <span>Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : 'Loading...'}</span>
+               {isUpdating ? <RefreshCw className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>}
+               <span>Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : 'Waiting...'}</span>
             </div>
           </div>
         </div>
       </nav>
 
       <main className="pt-24 pb-12 px-6 max-w-7xl mx-auto">
-        {/* Stats */}
+        {/* Stats - 静态展示，后续也可以做成动态 */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <div className="p-6 rounded-2xl bg-white/5 border border-white/10">
             <div className="text-gray-400 text-sm mb-2 flex items-center gap-2"><Activity className="w-4 h-4"/> RWA Market Cap</div>
@@ -173,7 +237,9 @@ export default function Home() {
           {/* News Feed */}
           <div>
             <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <Newspaper className="w-5 h-5 text-purple-500" /> Latest News
+              <Newspaper className="w-5 h-5 text-purple-500" /> 
+              {/* 改成中文标题 */}
+              最新资讯 (24h)
             </h2>
             <div className="space-y-4">
               {news.length > 0 ? news.map((item: any) => (
@@ -183,14 +249,17 @@ export default function Home() {
                       {item.source_info?.name || 'News'}
                     </span>
                     <span className="text-xs text-gray-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> {new Date(item.published_on * 1000).getHours()}:00
+                      <Clock className="w-3 h-3" /> 
+                      {/* 简单的格式化时间 */}
+                      {new Date(item.published_on * 1000).getHours()}:00
                     </span>
                   </div>
                   <h3 className="text-sm font-medium text-gray-300 group-hover:text-white line-clamp-2">
+                    {/* 这里的 title 自动就是中文了 */}
                     {item.title}
                   </h3>
                 </a>
-              )) : <div className="text-gray-500 text-sm">Loading news...</div>}
+              )) : <div className="text-gray-500 text-sm">正在加载资讯...</div>}
             </div>
           </div>
         </div>
