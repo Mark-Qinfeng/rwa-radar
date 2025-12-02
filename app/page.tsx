@@ -243,9 +243,7 @@ export default function Home() {
           {/* News Feed */}
           <div>
             <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <Newspaper className="w-5 h-5 text-purple-500" /> 
-              {/* 改成中文标题 */}
-              最新资讯 (24h)
+              <Newspaper className="w-5 h-5 text-purple-500" /> Latest News
             </h2>
             <div className="space-y-4">
               {news.length > 0 ? news.map((item: any) => (
@@ -255,17 +253,14 @@ export default function Home() {
                       {item.source_info?.name || 'News'}
                     </span>
                     <span className="text-xs text-gray-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> 
-                      {/* 简单的格式化时间 */}
-                      {new Date(item.published_on * 1000).getHours()}:00
+                      <Clock className="w-3 h-3" /> {new Date(item.published_on * 1000).getHours()}:00
                     </span>
                   </div>
                   <h3 className="text-sm font-medium text-gray-300 group-hover:text-white line-clamp-2">
-                    {/* 这里的 title 自动就是中文了 */}
                     {item.title}
                   </h3>
                 </a>
-              )) : <div className="text-gray-500 text-sm">正在加载资讯...</div>}
+              )) : <div className="text-gray-500 text-sm">Loading news...</div>}
             </div>
           </div>
         </div>
