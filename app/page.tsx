@@ -1,109 +1,65 @@
-import React from 'react';
+"use client"; // 1. 标记为客户端组件，允许使用 Hook 和实时更新
+
+import React, { useState, useEffect } from 'react';
 import { 
-  Globe, 
-  TrendingUp, 
-  Shield, 
-  Activity, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  Clock, 
-  DollarSign,
-  Newspaper
+  Globe, Activity, Shield, TrendingUp, 
+  ArrowUpRight, ArrowDownRight, Clock, 
+  DollarSign, Newspaper, RefreshCw 
 } from 'lucide-react';
+import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 
-// --- 1. 获取价格数据 (CoinGecko API) ---
-async function getMarketData() {
-  try {
-    // 查询 Ondo, Maker, Centrifuge, Maple, Goldfinch 的价格
-    const res = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance,maker,centrifuge,maple,goldfinch&vs_currencies=usd&include_24hr_change=true',
-      { next: { revalidate: 60 } } // 缓存 60 秒，防止被 API 限制
-    );
-    if (!res.ok) throw new Error('Price fetch failed');
-    return res.json();
-  } catch (error) {
-    console.error(error);
-    return {}; // 如果失败返回空对象，防止页面崩溃
-  }
-}
+// 模拟的初始数据，防止页面一开始显示 0
+const INITIAL_ASSETS = [
+  { id: 'ondo-finance', symbol: 'ONDO', name: 'Ondo Finance', price: 0.75, change: 2.5, history: [0.70, 0.72, 0.71, 0.74, 0.75, 0.76, 0.75] },
+  { id: 'maker', symbol: 'MKR', name: 'MakerDAO', price: 2100, change: -1.2, history: [2150, 2120, 2100, 2080, 2090, 2100, 2100] },
+  { id: 'centrifuge', symbol: 'CFG', name: 'Centrifuge', price: 0.65, change: 5.4, history: [0.60, 0.61, 0.63, 0.62, 0.64, 0.65, 0.65] },
+  { id: 'maple', symbol: 'MPL', name: 'Maple Finance', price: 14.2, change: 0.8, history: [13.8, 14.0, 14.1, 13.9, 14.2, 14.1, 14.2] },
+];
 
-// --- 2. 获取 TVL 数据 (DefiLlama API) ---
-async function getTVLData() {
-  try {
-    // 获取 RWA 赛道总 TVL
-    const res = await fetch('https://api.llama.fi/v2/chains', { next: { revalidate: 3600 } });
-    const data = await res.json();
-    // 这里简单模拟，实际应该遍历 RWA 协议。为了演示，我们取几个大公链的 TVL 作为参考
-    // 或者直接硬编码几个协议的 ID 获取精准数据。
-    // 为了展示效果，这里我们使用 API 获取的数据来动态生成一些数值
-    return data; 
-  } catch (error) {
-    return [];
-  }
-}
+export default function Home() {
+  const [assets, setAssets] = useState(INITIAL_ASSETS);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(new Date());
 
-// --- 3. 获取新闻数据 (CryptoCompare API) ---
-async function getNews() {
-  try {
-    const res = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN', { next: { revalidate: 300 } });
-    const data = await res.json();
-    return data.Data.slice(0, 5); // 只取前 5 条
-  } catch (error) {
-    return [];
-  }
-}
+  // 获取实时价格的函数
+  const fetchPrices = async () => {
+    try {
+      // 这是一个 API 技巧：一次请求获取所有币种，节省额度
+      const response = await fetch(
+        'https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance,maker,centrifuge,maple&vs_currencies=usd&include_24hr_change=true'
+      );
+      const data = await response.json();
 
-export default async function Home() {
-  // 并行获取所有数据
-  const [prices, tvlData, news] = await Promise.all([
-    getMarketData(),
-    getTVLData(),
-    getNews()
-  ]);
+      // 更新资产状态
+      setAssets(prevAssets => prevAssets.map(asset => {
+        const newPrice = data[asset.id]?.usd || asset.price;
+        const newChange = data[asset.id]?.usd_24h_change || asset.change;
+        
+        // 模拟走势图数据更新 (把最新价格加到历史数组末尾，移除第一个)
+        const newHistory = [...asset.history.slice(1), newPrice];
 
-  // 格式化价格数据的辅助函数
-  const getPrice = (id: string) => prices[id]?.usd || 0;
-  const getChange = (id: string) => prices[id]?.usd_24h_change || 0;
+        return {
+          ...asset,
+          price: newPrice,
+          change: newChange,
+          history: newHistory
+        };
+      }));
+      setLastUpdate(new Date());
+      setLoading(false);
+    } catch (error) {
+      console.error("Fetch error:", error);
+      // 即使失败也不要崩溃，保持旧数据
+      setLoading(false);
+    }
+  };
 
-  // 定义我们要展示的资产 (使用真实数据填充)
-  const assets = [
-    {
-      name: 'Ondo Finance',
-      symbol: 'ONDO',
-      price: getPrice('ondo-finance'),
-      change: getChange('ondo-finance'),
-      tvl: '$450M', // DefiLlama 具体协议 API 较复杂，这里暂时保留静态，下一步教你精准获取
-      type: 'U.S. Treasuries',
-      risk: 'Low'
-    },
-    {
-      name: 'MakerDAO',
-      symbol: 'MKR',
-      price: getPrice('maker'),
-      change: getChange('maker'),
-      tvl: '$8.2B',
-      type: 'Stablecoin/RWA',
-      risk: 'Medium'
-    },
-    {
-      name: 'Centrifuge',
-      symbol: 'CFG',
-      price: getPrice('centrifuge'),
-      change: getChange('centrifuge'),
-      tvl: '$280M',
-      type: 'Private Credit',
-      risk: 'High'
-    },
-    {
-      name: 'Maple Finance',
-      symbol: 'MPL',
-      price: getPrice('maple'),
-      change: getChange('maple'),
-      tvl: '$150M',
-      type: 'Institutional Lending',
-      risk: 'High'
-    },
-  ];
+  // 页面加载时执行，并设置定时器
+  useEffect(() => {
+    fetchPrices(); // 立即执行一次
+    const interval = setInterval(fetchPrices, 10000); // 每 10 秒刷新一次
+    return () => clearInterval(interval); // 清理定时器
+  }, []);
 
   return (
     <div className="min-h-screen bg-black text-white font-sans selection:bg-blue-500 selection:text-white">
@@ -116,141 +72,81 @@ export default async function Home() {
             </div>
             <span className="text-xl font-bold tracking-tight">RWA Radar</span>
           </div>
-          <div className="flex items-center gap-6 text-sm text-gray-400">
-            <span className="hover:text-white cursor-pointer transition-colors">Dashboard</span>
-            <span className="hover:text-white cursor-pointer transition-colors">Assets</span>
-            <span className="hover:text-white cursor-pointer transition-colors">Analytics</span>
-            <button className="bg-white text-black px-4 py-2 rounded-full font-medium hover:bg-gray-200 transition-colors">
-              Connect Wallet
-            </button>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500 bg-white/5 px-3 py-1 rounded-full">
+               {loading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>}
+               <span>Updated: {lastUpdate.toLocaleTimeString()}</span>
+            </div>
           </div>
         </div>
       </nav>
 
       <main className="pt-24 pb-12 px-6 max-w-7xl mx-auto">
-        {/* Header Section */}
         <div className="mb-12">
           <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-white to-gray-500 bg-clip-text text-transparent">
-            Real World Assets
+            Live Market Data
           </h1>
-          <p className="text-gray-400 text-lg max-w-2xl">
-            Track real-time performance of tokenized real-world assets across global markets.
-            Treasuries, Real Estate, and Private Credit on-chain.
+          <p className="text-gray-400 text-lg">
+            Real-time pricing and volatility tracking for top RWA protocols.
           </p>
         </div>
 
-        {/* Key Metrics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-blue-500/50 transition-colors group">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-gray-400">Total Value Locked</span>
-              <Activity className="w-5 h-5 text-blue-500 group-hover:scale-110 transition-transform" />
-            </div>
-            <div className="text-3xl font-bold text-white mb-1">$12.4B</div>
-            <div className="flex items-center gap-1 text-green-400 text-sm">
-              <ArrowUpRight className="w-4 h-4" />
-              <span>+2.4% (24h)</span>
-            </div>
+        {/* Asset Table with Charts */}
+        <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden backdrop-blur-sm">
+          <div className="grid grid-cols-12 p-4 text-sm text-gray-400 border-b border-white/10 font-medium">
+            <div className="col-span-3">Asset</div>
+            <div className="col-span-3 text-right">Price</div>
+            <div className="col-span-3 text-right">24h Change</div>
+            <div className="col-span-3 text-right">Trend (Last 7 Updates)</div>
           </div>
-
-          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-purple-500/50 transition-colors group">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-gray-400">Active Protocols</span>
-              <Shield className="w-5 h-5 text-purple-500 group-hover:scale-110 transition-transform" />
-            </div>
-            <div className="text-3xl font-bold text-white mb-1">42</div>
-            <div className="flex items-center gap-1 text-gray-400 text-sm">
-              <span>Across 8 Chains</span>
-            </div>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-green-500/50 transition-colors group">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-gray-400">Avg. APY</span>
-              <TrendingUp className="w-5 h-5 text-green-500 group-hover:scale-110 transition-transform" />
-            </div>
-            <div className="text-3xl font-bold text-white mb-1">5.2%</div>
-            <div className="flex items-center gap-1 text-green-400 text-sm">
-              <ArrowUpRight className="w-4 h-4" />
-              <span>+0.1% (7d)</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Asset Table */}
-          <div className="lg:col-span-2">
-            <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-blue-500" />
-              Top RWA Tokens (Live Price)
-            </h2>
-            <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
-              <div className="grid grid-cols-5 p-4 text-sm text-gray-400 border-b border-white/10">
-                <div className="col-span-2">Asset</div>
-                <div className="text-right">Price</div>
-                <div className="text-right">24h Change</div>
-                <div className="text-right">TVL</div>
-              </div>
+          
+          {assets.map((asset) => (
+            <div key={asset.id} className="grid grid-cols-12 p-4 items-center hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 group">
               
-              {assets.map((asset) => (
-                <div key={asset.symbol} className="grid grid-cols-5 p-4 items-center hover:bg-white/5 transition-colors border-b border-white/5 last:border-0">
-                  <div className="col-span-2 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-xs font-bold">
-                      {asset.symbol[0]}
-                    </div>
-                    <div>
-                      <div className="font-medium text-white">{asset.name}</div>
-                      <div className="text-xs text-gray-500">{asset.type}</div>
-                    </div>
-                  </div>
-                  <div className="text-right font-mono">
-                    ${asset.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <div className={`text-right font-mono flex items-center justify-end gap-1 ${asset.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {asset.change >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                    {Math.abs(asset.change).toFixed(2)}%
-                  </div>
-                  <div className="text-right text-gray-400 font-mono">
-                    {asset.tvl}
-                  </div>
+              {/* Name & Symbol */}
+              <div className="col-span-3 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-800 to-gray-900 border border-white/10 flex items-center justify-center font-bold text-sm text-gray-300">
+                  {asset.symbol[0]}
                 </div>
-              ))}
-            </div>
-          </div>
+                <div>
+                  <div className="font-bold text-white">{asset.name}</div>
+                  <div className="text-xs text-blue-400">{asset.symbol}</div>
+                </div>
+              </div>
 
-          {/* News Feed Section */}
-          <div>
-            <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <Newspaper className="w-5 h-5 text-purple-500" />
-              Latest News
-            </h2>
-            <div className="space-y-4">
-              {news.length > 0 ? news.map((item: any) => (
-                <a 
-                  key={item.id} 
-                  href={item.url} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="block p-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all hover:scale-[1.02]"
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <span className="text-xs font-medium text-blue-400 bg-blue-400/10 px-2 py-1 rounded">
-                      {item.source_info?.name || 'News'}
-                    </span>
-                    <span className="text-xs text-gray-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {new Date(item.published_on * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-medium text-gray-200 line-clamp-2 mb-1">
-                    {item.title}
-                  </h3>
-                </a>
-              )) : (
-                <div className="text-gray-500 text-sm p-4">Loading news...</div>
-              )}
+              {/* Price (Animated) */}
+              <div className="col-span-3 text-right font-mono text-lg text-white">
+                ${asset.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+
+              {/* Change */}
+              <div className="col-span-3 flex justify-end">
+                <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-medium ${asset.change >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                  {asset.change >= 0 ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                  {Math.abs(asset.change).toFixed(2)}%
+                </div>
+              </div>
+
+              {/* Mini Chart (Sparkline) */}
+              <div className="col-span-3 h-12 w-full flex justify-end">
+                <div className="w-32 h-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={asset.history.map((val, i) => ({ i, val }))}>
+                      <Line 
+                        type="monotone" 
+                        dataKey="val" 
+                        stroke={asset.change >= 0 ? "#4ade80" : "#f87171"} 
+                        strokeWidth={2} 
+                        dot={false} 
+                      />
+                      <YAxis domain={['auto', 'auto']} hide />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
             </div>
-          </div>
+          ))}
         </div>
       </main>
     </div>
