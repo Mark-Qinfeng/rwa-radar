@@ -115,7 +115,7 @@ export default function Home() {
     try {
       const symbols = ASSET_CONFIG.map(a => a.symbol).join(',');
       // 尝试获取筛选后的新闻
-      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=ZH&categories=${symbols},DeFi,Ethereum`);
+      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${symbols},DeFi,Ethereum`);
       const data = await res.json();
       
       // 关键修复：先检查 data.Data 到底是不是一个数组
